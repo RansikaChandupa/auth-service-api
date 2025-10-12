@@ -1,6 +1,6 @@
 package com.cpd.hotel_system.auth_service_api.advicer;
 
-import com.cpd.hotel_system.auth_service_api.BadRequestException;
+import com.cpd.hotel_system.auth_service_api.exception.BadRequestException;
 import com.cpd.hotel_system.auth_service_api.util.StandardResponseDto;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
