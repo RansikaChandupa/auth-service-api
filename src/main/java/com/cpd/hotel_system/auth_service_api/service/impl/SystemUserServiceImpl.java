@@ -8,6 +8,7 @@ import com.cpd.hotel_system.auth_service_api.entity.SystemUser;
 import com.cpd.hotel_system.auth_service_api.exception.DuplicateEntryException;
 import com.cpd.hotel_system.auth_service_api.repo.OtpRepo;
 import com.cpd.hotel_system.auth_service_api.repo.SystemUserRepo;
+import com.cpd.hotel_system.auth_service_api.service.EmailService;
 import com.cpd.hotel_system.auth_service_api.service.SystemUserService;
 import com.cpd.hotel_system.auth_service_api.util.OtpGenerator;
 import jakarta.ws.rs.core.Response;
@@ -30,6 +31,7 @@ public class SystemUserServiceImpl implements SystemUserService {
     private final KeycloakSecurityUtil keycloakUtil;
     private final OtpRepo  otpRepo;
     private final OtpGenerator otpGenerator;
+    private final EmailService  emailService;
 
     @Value("${keycloak.config.realm}")
     private String realm;
@@ -108,7 +110,7 @@ public class SystemUserServiceImpl implements SystemUserService {
                     .attempts(0)
                     .build();
             otpRepo.save(createdOtp);
-            // send email
+
         }
     }
     // The user, that needs to be stored in keycloak server
