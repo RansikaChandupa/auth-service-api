@@ -2,6 +2,7 @@ package com.cpd.hotel_system.auth_service_api;
 
 import com.cpd.hotel_system.auth_service_api.dto.request.SystemUserRequestDto;
 import com.cpd.hotel_system.auth_service_api.service.SystemUserService;
+import com.cpd.hotel_system.auth_service_api.util.PasswordGenerator;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
@@ -16,6 +17,7 @@ import java.util.Arrays;
 public class AuthServiceApiApplication implements CommandLineRunner {
 
     private final SystemUserService service;
+    private final PasswordGenerator passwordGenerator;
 	public static void main(String[] args) {
 		SpringApplication.run(AuthServiceApiApplication.class, args);
 	}
