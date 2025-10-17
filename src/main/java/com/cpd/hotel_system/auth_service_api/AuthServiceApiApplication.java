@@ -24,7 +24,9 @@ public class AuthServiceApiApplication implements CommandLineRunner {
 
     @Override
     public void run(String... args) throws Exception {
-
+        SystemUserRequestDto user1 = new SystemUserRequestDto("ABC","XYZ","abc@gmail.com", passwordGenerator.generatePassword(), "0711234567" );
+        SystemUserRequestDto user2 = new SystemUserRequestDto("STY","WTY","sty@gmail.com", passwordGenerator.generatePassword(), "0711234567" );
+        service.initializeHost(Arrays.asList(user1, user2));
 
     }
 }

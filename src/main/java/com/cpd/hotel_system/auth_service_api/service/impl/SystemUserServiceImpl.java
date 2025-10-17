@@ -1,5 +1,7 @@
 package com.cpd.hotel_system.auth_service_api.service.impl;
 
+import com.cpd.hotel_system.auth_service_api.dto.request.PasswordRequestDto;
+import com.cpd.hotel_system.auth_service_api.dto.request.RequestLoginDto;
 import com.cpd.hotel_system.auth_service_api.entity.Otp;
 import com.cpd.hotel_system.auth_service_api.exception.BadRequestException;
 import com.cpd.hotel_system.auth_service_api.config.KeycloakSecurityUtil;
@@ -7,6 +9,7 @@ import com.cpd.hotel_system.auth_service_api.dto.request.SystemUserRequestDto;
 import com.cpd.hotel_system.auth_service_api.entity.SystemUser;
 import com.cpd.hotel_system.auth_service_api.exception.DuplicateEntryException;
 import com.cpd.hotel_system.auth_service_api.exception.EntryNotFoundException;
+import com.cpd.hotel_system.auth_service_api.exception.UnAuthorizedException;
 import com.cpd.hotel_system.auth_service_api.repo.OtpRepo;
 import com.cpd.hotel_system.auth_service_api.repo.SystemUserRepo;
 import com.cpd.hotel_system.auth_service_api.service.EmailService;
@@ -14,13 +17,21 @@ import com.cpd.hotel_system.auth_service_api.service.SystemUserService;
 import com.cpd.hotel_system.auth_service_api.util.OtpGenerator;
 import jakarta.ws.rs.core.Response;
 import lombok.RequiredArgsConstructor;
+import org.keycloak.OAuth2Constants;
 import org.keycloak.admin.client.Keycloak;
 
+import org.keycloak.admin.client.resource.UserResource;
 import org.keycloak.representations.idm.CredentialRepresentation;
 import org.keycloak.representations.idm.RoleRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
+import org.springframework.web.client.RestTemplate;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -251,6 +262,138 @@ public class SystemUserServiceImpl implements SystemUserService {
         catch(Exception e){
             throw new RuntimeException(e.getMessage());
         }
+    }
+
+    @Override
+    public boolean verifyReset(String otp, String email) {
+        try{
+            Optional<SystemUser> selectedUser = systemUserRepo.findByEmail(email);
+            if(selectedUser.isEmpty()){
+                throw new EntryNotFoundException("unable to find any users associated with the provided email address");
+            }
+            SystemUser systemUser = selectedUser.get();
+            Otp systemUserOtp = systemUser.getOtp();
+            if(systemUserOtp.getCode().equals(otp)){
+                systemUserOtp.setAttempts(systemUserOtp.getAttempts()+1);
+                systemUserOtp.setUpdatedAt(new Date().toInstant());
+                systemUserOtp.setVerified(true);
+                otpRepo.save(systemUserOtp);
+                return true;
+            }
+            else {
+                if(systemUserOtp.getAttempts() >= 5){
+                    resend(email, "PASSWORD");
+                    throw new BadRequestException("You have a new verification code");
+                }
+                systemUserOtp.setAttempts(systemUserOtp.getAttempts() + 1);
+                systemUserOtp.setUpdatedAt(new Date().toInstant());
+                otpRepo.save(systemUserOtp);
+                return false;
+            }
+        }
+        catch(Exception e){
+            return false;
+        }
+    }
+
+    @Override
+    public boolean passwordReset(PasswordRequestDto dto) {
+        Optional<SystemUser> selectedUser = systemUserRepo.findByEmail(dto.getEmail());
+        if(selectedUser.isPresent()){
+            SystemUser systemUser = selectedUser.get();
+            Otp systemUserOtp = systemUser.getOtp();
+            Keycloak keycloak = keycloakUtil.getKeycloakInstance();
+            List<UserRepresentation> keyCloakUsers = keycloak.realm(realm).users().search(systemUser.getEmail());
+            if(!keyCloakUsers.isEmpty() && systemUserOtp.getCode().equals(dto.getCode())){
+                UserRepresentation keyCloakUser = keyCloakUsers.get(0);
+                UserResource userResource = keycloak.realm(realm).users().get(keyCloakUser.getId());
+                CredentialRepresentation newPass = new  CredentialRepresentation();
+                newPass.setType(CredentialRepresentation.PASSWORD);
+                newPass.setValue(dto.getPassword());
+                newPass.setTemporary(false);
+                userResource.resetPassword(newPass);
+                systemUser.setUpdatedAt(new Date().toInstant());
+                systemUserRepo.save(systemUser);
+                return true;
+            }
+            throw new BadRequestException("Try again");
+        }
+        throw new EntryNotFoundException("User not found");
+    }
+
+    @Override
+    public boolean verifyEmail(String otp, String email) {
+        Optional<SystemUser> selectedUser = systemUserRepo.findByEmail(email);
+        if(selectedUser.isEmpty()){
+            throw new EntryNotFoundException("user not found");
+        }
+        SystemUser systemUser = selectedUser.get();
+        Otp systemUserOtp = systemUser.getOtp();
+        if(systemUserOtp.isVerified()){
+            throw new BadRequestException("This otp has been used");
+        }
+        if(systemUserOtp.getAttempts() >= 5){
+            resend(email, "SIGNUP");
+            return false;
+        }
+        if(systemUserOtp.getCode().equals(otp)){
+            UserRepresentation keycloakUser = keycloakUtil.getKeycloakInstance().realm(realm)
+                    .users()
+                    .search(email)
+                    .stream()
+                    .findFirst()
+                    .orElseThrow(() -> new EntryNotFoundException("User not found"));
+            keycloakUser.setEmailVerified(true);
+            keycloakUser.setEnabled(true);
+
+            keycloakUtil.getKeycloakInstance().realm(realm).users().get(keycloakUser.getId()).update(keycloakUser);
+
+            systemUser.setEmailVerified(true);
+            systemUser.setEnabled(true);
+            systemUser.setActive(true);
+
+            systemUserRepo.save(systemUser);
+
+            systemUserOtp.setVerified(true);
+            systemUserOtp.setAttempts(systemUserOtp.getAttempts() + 1);
+            otpRepo.save(systemUserOtp);
+            return true;
+        }
+        else {
+            if(systemUserOtp.getAttempts() >= 5){
+                resend(email, "SIGNUP");
+                return false;
+            }
+            systemUserOtp.setAttempts(systemUserOtp.getAttempts() + 1);
+            otpRepo.save(systemUserOtp);
+        }
+        return false;
+    }
+
+    @Override
+    public Object userLogin(RequestLoginDto dto) {
+        Optional<SystemUser> selectedUser = systemUserRepo.findByEmail(dto.getEmail());
+        if(selectedUser.isEmpty()){
+            throw new EntryNotFoundException("user not found");
+        }
+        SystemUser systemUser = selectedUser.get();
+        if(!systemUser.isEmailVerified()){
+            resend(dto.getEmail(), "SIGNUP");
+            throw new UnAuthorizedException("Please verify email");
+        }
+
+        MultiValueMap<String, String> requestBody = new LinkedMultiValueMap<>();
+        requestBody.add("client_id", "");
+        requestBody.add("grant_type", OAuth2Constants.PASSWORD);
+        requestBody.add("username", dto.getEmail());
+        requestBody.add("client_secret", "");
+        requestBody.add("password", dto.getPassword());
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
+        RestTemplate restTemplate = new RestTemplate();
+        ResponseEntity<Object> response = restTemplate.postForEntity("keycloak api url", requestBody, Object.class);
+        return response.getBody();
     }
 
     // The user, that needs to be stored in keycloak server
